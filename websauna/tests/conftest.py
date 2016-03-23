@@ -109,41 +109,7 @@ def registry(request, app):
     return app.initializer.config.registry
 
 
-def create_test_dbsession(request, settings: dict, transaction_manager=transaction.manager) -> Session:
-    """Create a test database session and setup database.
-
-    Create and drop all tables when called. Add teardown function py.test to drop all tables during teardown.
-
-    :param request: py.test test request
-    :param settings: test.ini app settings
-    :param transaction_manager:
-    :return: New database session
-    """
-    from websauna.system.model.meta import Base
-
-    dbsession = create_dbsession(settings, manager=transaction_manager)
-    engine = dbsession.get_bind()
-
-    with transaction.manager:
-        Base.metadata.drop_all(engine)
-        Base.metadata.create_all(engine)
-
-    def teardown():
-        # There might be open transactions in the database. They will block DROP ALL and thus the tests would end up in a deadlock. Thus, we clean up all connections we know about.
-        # XXX: Fix this shit
-
-        with transaction.manager:
-            Base.metadata.drop_all(engine)
-
-        dbsession.close()
-
-    request.addfinalizer(teardown)
-
-    return dbsession
-
-
-
-@pytest.fixture()
+@pytest.yield_fixture
 def dbsession(request, app) -> Session:
     """Create a test database and database session.
 
@@ -172,7 +138,19 @@ def dbsession(request, app) -> Session:
 
     :return: A SQLAlchemy session instance you can use to query database.
     """
-    return create_test_dbsession(request, app.initializer.config.registry.settings)
+    dbsession = create_dbsession(settings, manager=transaction_manager)
+    engine = dbsession.get_bind()
+
+    with transaction.manager:
+        Base.metadata.drop_all(engine)
+        Base.metadata.create_all(engine)
+
+    yield dbsession
+
+    with transaction.manager:
+        Base.metadata.drop_all(engine)
+
+    dbsession.close()
 
 
 @pytest.fixture()
